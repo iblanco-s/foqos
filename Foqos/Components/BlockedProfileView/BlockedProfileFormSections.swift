@@ -827,8 +827,10 @@ struct BlockedProfileAppLimitsSection: View {
   var disabled: Bool
 
   var body: some View {
-    Section("Daily Limits") {
+    Section {
       BlockedProfileAppLimitsFields(draft: draft, disabled: disabled)
+    } header: {
+      Text("Daily Limits")
     } footer: {
       Text("Alternative to sessions: enforced every day via Screen Time, even with the app closed.")
     }
