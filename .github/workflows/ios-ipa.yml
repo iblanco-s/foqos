@@ -1,0 +1,70 @@
+name: iOS IPA (unsigned)
+
+# Free CI for public repos: verifies that the app + extensions compile and
+# produces an UNSIGNED .ipa artifact for inspection.
+#
+# IMPORTANT: an unsigned IPA can NOT be installed on a stock iPhone.
+# iOS only installs signed apps. To run on your iPhone you must sign it
+# yourself (see the Debug/Install notes in the README section below):
+#  - Easiest/free: open foqos.xcodeproj in Xcode, select your Personal Team,
+#    connect the iPhone and Run (7-day provisioning, free Apple ID).
+#  - Alternative: sideload the unsigned IPA with AltStore/SideStore/Sideloadly,
+#    which re-sign with your own Apple ID on your machine.
+# Paid Apple Developer Program ($99/yr) is only needed for TestFlight/App Store.
+
+on:
+  push:
+    branches:
+      - feat/app-limits
+  workflow_dispatch:
+
+jobs:
+  build-unsigned-ipa:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          ls /Applications | grep -i Xcode || true
+          if [ -d /Applications/Xcode_26.3.app ]; then
+            sudo xcode-select -s /Applications/Xcode_26.3.app
+          else
+            sudo xcode-select -s /Applications/Xcode.app
+          fi
+          xcodebuild -version
+
+      - name: Simulator build (compile check, no signing)
+        run: |
+          xcodebuild -project foqos.xcodeproj -scheme foqos \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO build
+
+      - name: Archive for device (unsigned)
+        run: |
+          xcodebuild -project foqos.xcodeproj -scheme foqos \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/foqos.xcarchive archive \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+
+      - name: Pack unsigned IPA
+        run: |
+          APP=$(find build/foqos.xcarchive/Products/Applications -maxdepth 1 -name '*.app' | head -n 1)
+          echo "Found app: $APP"
+          test -n "$APP"
+          rm -rf build/Payload build/Foqos-unsigned.ipa
+          mkdir -p build/Payload
+          cp -R "$APP" build/Payload/
+          (cd build && zip -qry Foqos-unsigned.ipa Payload)
+          ls -lh build/Foqos-unsigned.ipa
+
+      - name: Upload unsigned IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Foqos-unsigned-ipa
+          path: build/Foqos-unsigned.ipa
+          retention-days: 14
