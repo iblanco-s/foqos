@@ -74,7 +74,7 @@ class ShieldConfigurationExtension: ShieldConfigurationDataSource {
         color: .white
       ),
       subtitle: ShieldConfiguration.Label(
-        text: randomMessage.subtitle,
+        text: withPendingTasks(randomMessage.subtitle),
         color: UIColor.white.withAlphaComponent(0.88)
       ),
       primaryButtonLabel: ShieldConfiguration.Label(
@@ -84,6 +84,12 @@ class ShieldConfigurationExtension: ShieldConfigurationDataSource {
       primaryButtonBackgroundColor: .white,
       secondaryButtonLabel: nil
     )
+  }
+
+  /// Appends pending tasks (if any) so the user sees what to do instead.
+  private func withPendingTasks(_ subtitle: String) -> String {
+    guard let block = SharedData.pendingTasksShieldBlock() else { return subtitle }
+    return subtitle + "\n\n" + block
   }
 
   private func softUnblockConfiguration(
@@ -135,7 +141,7 @@ class ShieldConfigurationExtension: ShieldConfigurationDataSource {
         color: .white
       ),
       subtitle: ShieldConfiguration.Label(
-        text: subtitle,
+        text: withPendingTasks(subtitle),
         color: UIColor.white.withAlphaComponent(0.88)
       ),
       primaryButtonLabel: ShieldConfiguration.Label(
@@ -170,7 +176,7 @@ class ShieldConfigurationExtension: ShieldConfigurationDataSource {
         color: .white
       ),
       subtitle: ShieldConfiguration.Label(
-        text: subtitle,
+        text: withPendingTasks(subtitle),
         color: UIColor.white.withAlphaComponent(0.88)
       ),
       primaryButtonLabel: ShieldConfiguration.Label(
@@ -236,8 +242,9 @@ class ShieldConfigurationExtension: ShieldConfigurationDataSource {
         icon: makeEmojiIcon("⏳", size: 96),
         title: ShieldConfiguration.Label(text: "Time's up for today", color: .white),
         subtitle: ShieldConfiguration.Label(
-          text:
-            "\(appName) hit its daily limit in \(profile.name). Fresh budget at midnight.",
+          text: withPendingTasks(
+            "\(appName) hit its daily limit in \(profile.name). Fresh budget at midnight."
+          ),
           color: UIColor.white.withAlphaComponent(0.88)
         ),
         primaryButtonLabel: ShieldConfiguration.Label(text: "Back", color: .black),
@@ -257,8 +264,9 @@ class ShieldConfigurationExtension: ShieldConfigurationDataSource {
         icon: makeEmojiIcon("🔒", size: 96),
         title: ShieldConfiguration.Label(text: "No opens left", color: .white),
         subtitle: ShieldConfiguration.Label(
-          text:
-            "You used all opens for \(appName) in \(profile.name) today. Resets at midnight.",
+          text: withPendingTasks(
+            "You used all opens for \(appName) in \(profile.name) today. Resets at midnight."
+          ),
           color: UIColor.white.withAlphaComponent(0.88)
         ),
         primaryButtonLabel: ShieldConfiguration.Label(text: "Back", color: .black),
@@ -274,14 +282,16 @@ class ShieldConfigurationExtension: ShieldConfigurationDataSource {
       icon: makeEmojiIcon("🎯", size: 96),
       title: ShieldConfiguration.Label(text: "Daily limit", color: .white),
       subtitle: ShieldConfiguration.Label(
-        text:
-          "\(appName) · \(remaining) open\(remaining == 1 ? "" : "s") left in \(profile.name)\n\(dots)\nResets at midnight.",
+        text: withPendingTasks(
+          "\(appName) · \(remaining) open\(remaining == 1 ? "" : "s") left in \(profile.name)\n\(dots)\nResets at midnight."
+        ),
         color: UIColor.white.withAlphaComponent(0.88)
       ),
       primaryButtonLabel: ShieldConfiguration.Label(
         text: "Open for \(minutes)m", color: .black),
       primaryButtonBackgroundColor: .white,
-      secondaryButtonLabel: ShieldConfiguration.Label(text: "Back", color: .white)
+      secondaryButtonLabel: ShieldConfiguration.Label(
+        text: "I'll do a task", color: .white)
     )
   }
 

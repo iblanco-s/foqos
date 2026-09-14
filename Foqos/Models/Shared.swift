@@ -11,6 +11,91 @@ enum SharedData {
     case profileSnapshots
     case activeScheduleSession
     case completedScheduleSessions
+    case focusTasks
+  }
+
+  // MARK: - Pending tasks shown on shields as friction before opening apps.
+  struct FocusTask: Codable, Equatable, Identifiable {
+    var id: UUID
+    var title: String
+    var estimatedMinutes: Int
+    var createdAt: Date
+    var completedAt: Date?
+
+    var isCompleted: Bool { completedAt != nil }
+
+    var displayLine: String {
+      if estimatedMinutes <= 0 { return title }
+      if estimatedMinutes < 60 { return "\(title) (\(estimatedMinutes)m)" }
+      let h = estimatedMinutes / 60
+      let m = estimatedMinutes % 60
+      if m == 0 { return "\(title) (\(h)h)" }
+      return "\(title) (\(h)h \(m)m)"
+    }
+  }
+
+  static var focusTasks: [FocusTask] {
+    get {
+      guard let data = suite.data(forKey: Key.focusTasks.rawValue) else { return [] }
+      return (try? JSONDecoder().decode([FocusTask].self, from: data)) ?? []
+    }
+    set {
+      if let data = try? JSONEncoder().encode(newValue) {
+        suite.set(data, forKey: Key.focusTasks.rawValue)
+      } else {
+        suite.removeObject(forKey: Key.focusTasks.rawValue)
+      }
+    }
+  }
+
+  static func pendingFocusTasks(limit: Int = 3) -> [FocusTask] {
+    focusTasks.filter { !$0.isCompleted }.prefix(limit).map { $0 }
+  }
+
+  static func pendingFocusTaskCount() -> Int {
+    focusTasks.filter { !$0.isCompleted }.count
+  }
+
+  @discardableResult
+  static func addFocusTask(title: String, estimatedMinutes: Int) -> FocusTask? {
+    let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return nil }
+    let task = FocusTask(
+      id: UUID(),
+      title: String(trimmed.prefix(120)),
+      estimatedMinutes: min(max(estimatedMinutes, 0), 1440),
+      createdAt: Date(),
+      completedAt: nil
+    )
+    focusTasks = focusTasks + [task]
+    return task
+  }
+
+  static func toggleFocusTask(id: UUID) {
+    focusTasks = focusTasks.map { task in
+      guard task.id == id else { return task }
+      var updated = task
+      updated.completedAt = task.isCompleted ? nil : Date()
+      return updated
+    }
+  }
+
+  static func deleteFocusTask(id: UUID) {
+    focusTasks = focusTasks.filter { $0.id != id }
+  }
+
+  /// Preformatted block for shield subtitles. Empty when nothing pending.
+  /// Plain text only: shields run out-of-process without SwiftUI.
+  static func pendingTasksShieldBlock(maxTasks: Int = 3) -> String? {
+    let pending = pendingFocusTasks(limit: maxTasks)
+    guard !pending.isEmpty else { return nil }
+    let total = pendingFocusTaskCount()
+    var lines = ["Do one of these instead:"]
+    lines += pending.map { "• " + $0.displayLine }
+    if total > pending.count {
+      lines.append("+\(total - pending.count) more in Foqos")
+    }
+    return lines.joined(separator: "\n")
   }
 
   // MARK: – Serializable snapshot of a profile (no sessions)

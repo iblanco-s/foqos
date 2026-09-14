@@ -44,6 +44,10 @@ struct HomeView: View {
   // Active session view
   @State private var showActiveProfileSessionView = false
 
+  // Tasks view
+  @State private var showTasksView = false
+  @State private var pendingTaskCount = SharedData.pendingFocusTaskCount()
+
   // Navigate to profile
   @State private var navigateToProfileId: UUID? = nil
 
@@ -178,6 +182,37 @@ struct HomeView: View {
           )
           .padding(.horizontal, 16)
         }
+
+        Button(action: { showTasksView = true }) {
+          HStack(spacing: 12) {
+            Image(systemName: "checklist")
+              .font(.title2)
+              .foregroundStyle(.secondary)
+              .frame(width: 32)
+            VStack(alignment: .leading, spacing: 2) {
+              Text("Tasks")
+                .font(.headline)
+                .foregroundStyle(.primary)
+              Text(
+                pendingTaskCount == 0
+                  ? "Add what to do instead of opening blocked apps"
+                  : "\(pendingTaskCount) pending — shown on the block screen"
+              )
+              .font(.caption)
+              .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Image(systemName: "chevron.right")
+              .foregroundStyle(.tertiary)
+          }
+          .padding(14)
+          .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+              .fill(Color.secondary.opacity(0.1))
+          )
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 16)
       }
     }
     .refreshable {
@@ -204,6 +239,14 @@ struct HomeView: View {
       isPresented: $isProfileListPresent,
     ) {
       BlockedProfileListView()
+    }
+    .sheet(isPresented: $showTasksView) {
+      TasksView()
+    }
+    .onChange(of: showTasksView) { _, isShowing in
+      if !isShowing {
+        pendingTaskCount = SharedData.pendingFocusTaskCount()
+      }
     }
     .frame(
       minWidth: 0,
@@ -395,6 +438,7 @@ struct HomeView: View {
     requestAuthorizer.refreshAuthorizationStatus()
     strategyManager.loadActiveSession(context: context)
     strategyManager.cleanUpGhostSchedules(context: context)
+    pendingTaskCount = SharedData.pendingFocusTaskCount()
     refreshAlerts()
   }
 
