@@ -122,6 +122,8 @@ struct BlockedProfileView: View {
           disabled: isBlocking
         )
 
+        BlockedProfileAppLimitsSection(draft: draft, disabled: isBlocking)
+
         BlockedProfileBreaksSection(draft: draft, disabled: isBlocking)
 
         BlockedProfileStrictSafeguardsSection(draft: draft, disabled: isBlocking)
@@ -282,6 +284,7 @@ struct BlockedProfileView: View {
                 let clonedProfile = try BlockedProfiles.cloneProfile(
                   source, in: modelContext, newName: trimmed)
                 DeviceActivityCenterUtil.scheduleTimerActivity(for: clonedProfile)
+                DeviceActivityCenterUtil.scheduleAppLimitMonitoring(for: clonedProfile)
               }
             } catch {
               showError(message: error.localizedDescription)

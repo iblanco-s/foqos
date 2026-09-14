@@ -95,10 +95,24 @@ class StrategyManager: ObservableObject {
 
       // Close live activity if no session is active and a scheduled session might have ended
       liveActivityManager.endSessionActivity()
+
+      // No session owns the shields: re-assert daily app limits and make sure
+      // their DeviceActivity monitoring survived reboots/restores.
+      rescheduleAppLimits(context: context)
+      appBlocker.refreshAllAppLimitRestrictions()
     }
 
     // Reload widget to reflect any changes from extension (e.g., timer expiration)
     WidgetCenter.shared.reloadTimelines(ofKind: "ProfileControlWidget")
+  }
+
+  /// Re-schedules DeviceActivity monitoring for every profile with limits.
+  /// Safe to call on every foreground: startMonitoring is idempotent per name.
+  func rescheduleAppLimits(context: ModelContext) {
+    let profiles = (try? BlockedProfiles.fetchProfiles(in: context)) ?? []
+    for profile in profiles where profile.hasAppLimitsEnabled {
+      DeviceActivityCenterUtil.scheduleAppLimitMonitoring(for: profile)
+    }
   }
 
   func toggleBlocking(context: ModelContext, activeProfile: BlockedProfiles?) {
@@ -427,6 +441,11 @@ class StrategyManager: ObservableObject {
     // Decrement the remaining emergency unblocks
     emergencyUnblocksRemaining -= 1
 
+    // Emergency unblock clears session shields; restore daily limits.
+    self.activeSession = nil
+    ActiveProfileSyncStore.publish(session: nil)
+    appBlocker.refreshAllAppLimitRestrictions()
+
     // Refresh widgets when emergency unblock ends session
     WidgetCenter.shared.reloadTimelines(ofKind: "ProfileControlWidget")
   }
@@ -655,6 +674,9 @@ class StrategyManager: ObservableObject {
 
     // Remove all pause timer activities
     DeviceActivityCenterUtil.removeAllPauseTimerActivities()
+
+    // Session no longer owns the shields: restore daily app limits, if any.
+    appBlocker.refreshAllAppLimitRestrictions()
   }
 
   private func dismissView() {
@@ -854,6 +876,10 @@ class StrategyManager: ObservableObject {
 
     // Remove all strategy timer activities
     DeviceActivityCenterUtil.removeAllStrategyTimerActivities()
+
+    // Re-assert daily limits after the wipe so they stay enforced.
+    rescheduleAppLimits(context: context)
+    appBlocker.refreshAllAppLimitRestrictions()
 
     print("Blocking state reset complete")
   }

@@ -27,6 +27,12 @@ final class BlockedProfileDraft: ObservableObject {
   @Published var selectedActivity: FamilyActivitySelection
   @Published var strategyData: Data?
   @Published var askForStartSettings: Bool
+  @Published var appLimitsEnabled: Bool
+  @Published var enableDailyTimeLimit: Bool
+  @Published var dailyTimeLimitInMinutes: Int
+  @Published var enableDailyOpenLimit: Bool
+  @Published var dailyOpenLimit: Int
+  @Published var appLimitOpenDurationInMinutes: Int
   @Published var selectedStrategy: BlockingStrategy? {
     didSet {
       let oldSettingsKind = StrategyStartSettingsKind(strategy: oldValue)
@@ -67,6 +73,22 @@ final class BlockedProfileDraft: ObservableObject {
     physicalUnblockItems = profile?.physicalUnblockItems ?? []
     strategyData = nil
     askForStartSettings = true
+    appLimitsEnabled = profile?.appLimitsEnabled ?? false
+    if let minutes = profile?.dailyTimeLimitInMinutes, minutes > 0 {
+      enableDailyTimeLimit = true
+      dailyTimeLimitInMinutes = minutes
+    } else {
+      enableDailyTimeLimit = false
+      dailyTimeLimitInMinutes = 60
+    }
+    if let opens = profile?.dailyOpenLimit, opens > 0 {
+      enableDailyOpenLimit = true
+      dailyOpenLimit = opens
+    } else {
+      enableDailyOpenLimit = false
+      dailyOpenLimit = 5
+    }
+    appLimitOpenDurationInMinutes = profile?.appLimitOpenDurationInMinutes ?? 5
     schedule =
       profile?.schedule
       ?? BlockedProfileSchedule(
@@ -115,6 +137,11 @@ final class BlockedProfileDraft: ObservableObject {
     let physicalUnblockItemsToSave: [PhysicalUnblockItem]? =
       physicalUnblockItems.isEmpty ? nil : physicalUnblockItems
     let enableTimedBreaksToSave = selectedStrategyAllowsTimedBreaks && enableBreaks
+    let limits = SharedData.AppLimitConfiguration(
+      dailyTimeLimitInMinutes: enableDailyTimeLimit ? dailyTimeLimitInMinutes : nil,
+      dailyOpenLimit: enableDailyOpenLimit ? dailyOpenLimit : nil,
+      openDurationInMinutes: appLimitOpenDurationInMinutes
+    ).normalized
 
     if let existingProfile {
       let updatedProfile = try BlockedProfiles.updateProfile(
@@ -142,10 +169,16 @@ final class BlockedProfileDraft: ObservableObject {
         physicalUnblockItems: .some(physicalUnblockItemsToSave),
         schedule: schedule,
         disableBackgroundStops: disableBackgroundStops,
-        enableEmergencyUnblock: enableEmergencyUnblock
+        enableEmergencyUnblock: enableEmergencyUnblock,
+        appLimitsEnabled: appLimitsEnabled,
+        dailyTimeLimitInMinutes: .some(limits.dailyTimeLimitInMinutes),
+        dailyOpenLimit: .some(limits.dailyOpenLimit),
+        appLimitOpenDurationInMinutes: limits.openDurationInMinutes
+          ?? SharedData.AppLimitConfiguration.defaultOpenDurationInMinutes
       )
 
       DeviceActivityCenterUtil.scheduleTimerActivity(for: updatedProfile)
+      DeviceActivityCenterUtil.scheduleAppLimitMonitoring(for: updatedProfile)
       return updatedProfile
     }
 
@@ -173,10 +206,16 @@ final class BlockedProfileDraft: ObservableObject {
       physicalUnblockItems: physicalUnblockItemsToSave,
       schedule: schedule,
       disableBackgroundStops: disableBackgroundStops,
-      enableEmergencyUnblock: enableEmergencyUnblock
+      enableEmergencyUnblock: enableEmergencyUnblock,
+      appLimitsEnabled: appLimitsEnabled,
+      dailyTimeLimitInMinutes: limits.dailyTimeLimitInMinutes,
+      dailyOpenLimit: limits.dailyOpenLimit,
+      appLimitOpenDurationInMinutes: limits.openDurationInMinutes
+        ?? SharedData.AppLimitConfiguration.defaultOpenDurationInMinutes
     )
 
     DeviceActivityCenterUtil.scheduleTimerActivity(for: newProfile)
+    DeviceActivityCenterUtil.scheduleAppLimitMonitoring(for: newProfile)
     return newProfile
   }
 

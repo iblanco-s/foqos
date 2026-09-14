@@ -51,6 +51,14 @@ class BlockedProfiles {
 
   var enableEmergencyUnblock: Bool = true
 
+  // MARK: - Daily app limits (alternative to focus sessions).
+  // Profile-level limits applied to the whole selection as a group.
+  // nil time/open = no limit. Disabled flag keeps config without enforcing.
+  var appLimitsEnabled: Bool = false
+  var dailyTimeLimitInMinutes: Int? = nil
+  var dailyOpenLimit: Int? = nil
+  var appLimitOpenDurationInMinutes: Int = 5
+
   var customReminderMessage: String?
 
   @Relationship var sessions: [BlockedProfileSession] = []
@@ -98,6 +106,26 @@ class BlockedProfiles {
     return items.contains { $0.type == type }
   }
 
+  var appLimitConfiguration: SharedData.AppLimitConfiguration {
+    SharedData.AppLimitConfiguration(
+      dailyTimeLimitInMinutes: dailyTimeLimitInMinutes,
+      dailyOpenLimit: dailyOpenLimit,
+      openDurationInMinutes: appLimitOpenDurationInMinutes
+    ).normalized
+  }
+
+  var hasAppLimitsEnabled: Bool {
+    appLimitsEnabled && appLimitConfiguration.isEnabled
+  }
+
+  var hasAppTimeLimit: Bool {
+    hasAppLimitsEnabled && appLimitConfiguration.hasTimeLimit
+  }
+
+  var hasAppOpenLimit: Bool {
+    hasAppLimitsEnabled && appLimitConfiguration.hasOpenLimit
+  }
+
   init(
     id: UUID = UUID(),
     name: String,
@@ -125,7 +153,11 @@ class BlockedProfiles {
     physicalUnblockItems: [PhysicalUnblockItem]? = nil,
     schedule: BlockedProfileSchedule? = nil,
     disableBackgroundStops: Bool = false,
-    enableEmergencyUnblock: Bool = true
+    enableEmergencyUnblock: Bool = true,
+    appLimitsEnabled: Bool = false,
+    dailyTimeLimitInMinutes: Int? = nil,
+    dailyOpenLimit: Int? = nil,
+    appLimitOpenDurationInMinutes: Int = 5
   ) {
     self.id = id
     self.name = name
@@ -158,6 +190,18 @@ class BlockedProfiles {
 
     self.disableBackgroundStops = disableBackgroundStops
     self.enableEmergencyUnblock = enableEmergencyUnblock
+
+    let normalizedLimits = SharedData.AppLimitConfiguration(
+      dailyTimeLimitInMinutes: dailyTimeLimitInMinutes,
+      dailyOpenLimit: dailyOpenLimit,
+      openDurationInMinutes: appLimitOpenDurationInMinutes
+    ).normalized
+    self.appLimitsEnabled = appLimitsEnabled
+    self.dailyTimeLimitInMinutes = normalizedLimits.dailyTimeLimitInMinutes
+    self.dailyOpenLimit = normalizedLimits.dailyOpenLimit
+    self.appLimitOpenDurationInMinutes =
+      normalizedLimits.openDurationInMinutes
+      ?? SharedData.AppLimitConfiguration.defaultOpenDurationInMinutes
   }
 
   func showStopButton(elapsedTime: TimeInterval) -> Bool {
@@ -228,7 +272,11 @@ class BlockedProfiles {
     physicalUnblockItems: [PhysicalUnblockItem]?? = nil,
     schedule: BlockedProfileSchedule? = nil,
     disableBackgroundStops: Bool? = nil,
-    enableEmergencyUnblock: Bool? = nil
+    enableEmergencyUnblock: Bool? = nil,
+    appLimitsEnabled: Bool? = nil,
+    dailyTimeLimitInMinutes: Int?? = nil,
+    dailyOpenLimit: Int?? = nil,
+    appLimitOpenDurationInMinutes: Int? = nil
   ) throws -> BlockedProfiles {
     if let newName = name {
       profile.name = newName
@@ -334,6 +382,30 @@ class BlockedProfiles {
       profile.enableEmergencyUnblock = newEnableEmergencyUnblock
     }
 
+    if let newAppLimitsEnabled = appLimitsEnabled {
+      profile.appLimitsEnabled = newAppLimitsEnabled
+    }
+
+    if let newDailyTimeLimit = dailyTimeLimitInMinutes {
+      profile.dailyTimeLimitInMinutes = newDailyTimeLimit
+    }
+
+    if let newDailyOpenLimit = dailyOpenLimit {
+      profile.dailyOpenLimit = newDailyOpenLimit
+    }
+
+    if let newOpenDuration = appLimitOpenDurationInMinutes {
+      profile.appLimitOpenDurationInMinutes = newOpenDuration
+    }
+
+    // Normalize limits so out-of-range values never persist.
+    let normalizedLimits = profile.appLimitConfiguration
+    profile.dailyTimeLimitInMinutes = normalizedLimits.dailyTimeLimitInMinutes
+    profile.dailyOpenLimit = normalizedLimits.dailyOpenLimit
+    profile.appLimitOpenDurationInMinutes =
+      normalizedLimits.openDurationInMinutes
+      ?? SharedData.AppLimitConfiguration.defaultOpenDurationInMinutes
+
     if let physicalUnblockItems {
       profile.physicalUnblockItems = PhysicalUnblockItem.normalizedItems(physicalUnblockItems)
     }
@@ -371,6 +443,8 @@ class BlockedProfiles {
 
     // Remove the schedule restrictions
     DeviceActivityCenterUtil.removeScheduleTimerActivities(for: profile)
+    DeviceActivityCenterUtil.removeAppLimitMonitoring(for: profile)
+    AppLimitStore.removeState(for: profile.id)
 
     // Then delete the profile
     context.delete(profile)
@@ -410,7 +484,11 @@ class BlockedProfiles {
       physicalUnblockItems: profile.physicalUnblockItems,
       schedule: profile.schedule,
       disableBackgroundStops: profile.disableBackgroundStops,
-      enableEmergencyUnblock: profile.enableEmergencyUnblock
+      enableEmergencyUnblock: profile.enableEmergencyUnblock,
+      appLimitsEnabled: profile.appLimitsEnabled,
+      dailyTimeLimitInMinutes: profile.dailyTimeLimitInMinutes,
+      dailyOpenLimit: profile.dailyOpenLimit,
+      appLimitOpenDurationInMinutes: profile.appLimitOpenDurationInMinutes
     )
   }
 
@@ -468,7 +546,11 @@ class BlockedProfiles {
     physicalUnblockItems: [PhysicalUnblockItem]? = nil,
     schedule: BlockedProfileSchedule? = nil,
     disableBackgroundStops: Bool = false,
-    enableEmergencyUnblock: Bool = true
+    enableEmergencyUnblock: Bool = true,
+    appLimitsEnabled: Bool = false,
+    dailyTimeLimitInMinutes: Int? = nil,
+    dailyOpenLimit: Int? = nil,
+    appLimitOpenDurationInMinutes: Int = 5
   ) throws -> BlockedProfiles {
     let profileOrder = getNextOrder(in: context)
 
@@ -495,7 +577,11 @@ class BlockedProfiles {
       domains: domains,
       physicalUnblockItems: physicalUnblockItems,
       disableBackgroundStops: disableBackgroundStops,
-      enableEmergencyUnblock: enableEmergencyUnblock
+      enableEmergencyUnblock: enableEmergencyUnblock,
+      appLimitsEnabled: appLimitsEnabled,
+      dailyTimeLimitInMinutes: dailyTimeLimitInMinutes,
+      dailyOpenLimit: dailyOpenLimit,
+      appLimitOpenDurationInMinutes: appLimitOpenDurationInMinutes
     )
 
     if let schedule = schedule {
@@ -539,7 +625,11 @@ class BlockedProfiles {
       domains: source.domains,
       physicalUnblockItems: source.physicalUnblockItems,
       schedule: source.schedule,
-      enableEmergencyUnblock: source.enableEmergencyUnblock
+      enableEmergencyUnblock: source.enableEmergencyUnblock,
+      appLimitsEnabled: source.appLimitsEnabled,
+      dailyTimeLimitInMinutes: source.dailyTimeLimitInMinutes,
+      dailyOpenLimit: source.dailyOpenLimit,
+      appLimitOpenDurationInMinutes: source.appLimitOpenDurationInMinutes
     )
 
     context.insert(cloned)

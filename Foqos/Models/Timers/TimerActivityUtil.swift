@@ -25,6 +25,20 @@ class TimerActivityUtil {
     timerActivity.stop(for: profile, activityName: activity)
   }
 
+  static func appLimitThresholdReached(
+    event: DeviceActivityEvent.Name, for activity: DeviceActivityName
+  ) {
+    // Event names are "AppLimitUsageEvent.<profileUUID>".
+    let profileId = event.rawValue.split(separator: ".").last.map(String.init)
+      ?? TimerActivityUtil.getTimerParts(from: activity).profileId
+    guard let profile = getProfile(for: profileId),
+      profile.hasAppTimeLimit
+    else {
+      return
+    }
+    AppLimitTimerActivity().eventThresholdReached(for: profile)
+  }
+
   private static func getTimerParts(from activity: DeviceActivityName) -> (
     deviceActivityId: String, profileId: String
   ) {
@@ -53,6 +67,10 @@ class TimerActivityUtil {
       return PauseTimerActivity()
     case SoftUnblockGrantTimerActivity.id:
       return SoftUnblockGrantTimerActivity()
+    case AppLimitTimerActivity.id:
+      return AppLimitTimerActivity()
+    case AppLimitGrantTimerActivity.id:
+      return AppLimitGrantTimerActivity()
     default:
       return nil
     }

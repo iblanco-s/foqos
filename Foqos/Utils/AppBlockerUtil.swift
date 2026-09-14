@@ -134,4 +134,112 @@ class AppBlockerUtil {
 
     return []
   }
+
+  // MARK: - Daily app limits
+
+  /// Applies shields for a single limit profile, respecting open grants and
+  /// time-exceeded state. Time-only profiles stay unshielded until the daily
+  /// threshold is reached; open-limit profiles stay shielded with per-tap grants.
+  func activateRestrictionsForAppLimit(for profile: SharedData.ProfileSnapshot) {
+    guard profile.hasAppLimitsEnabled else { return }
+
+    if AppLimitStore.isTimeExceeded(for: profile) {
+      // Hard block: time is up, ignore any remaining open grants.
+      activateRestrictions(for: profile)
+      return
+    }
+
+    guard profile.hasAppOpenLimit else {
+      // Time-only limit not yet exceeded: leave apps usable so usage accrues.
+      return
+    }
+
+    let grants = AppLimitStore.activeGrants(for: profile.id)
+    let unblockedApps = Set(grants.compactMap(\.resource.applicationToken))
+    let unblockedCategories = Set(grants.compactMap(\.resource.categoryToken))
+    activateSoftUnblockRestrictions(
+      for: profile,
+      unblockedApplicationTokens: unblockedApps,
+      unblockedCategoryTokens: unblockedCategories
+    )
+  }
+
+  /// Recomputes shields for every limit profile. Never overrides an active
+  /// focus session: sessions own the store while they run.
+  /// V1 supports blocklist mode (Allow Only OFF). Allow-mode profiles are
+  /// skipped here; their time thresholds still enforce via single-profile
+  /// shields in the monitor extension.
+  func refreshAllAppLimitRestrictions() {
+    if SharedData.getActiveSharedSession() != nil {
+      return
+    }
+
+    let limitProfiles = SharedData.profileSnapshots.values.filter {
+      $0.hasAppLimitsEnabled && !$0.enableAllowMode
+    }
+    guard !limitProfiles.isEmpty else { return }
+
+    // Time-exceeded profiles always shield fully. Open-limit profiles shield
+    // minus their active grants. Time-only profiles that have not exceeded
+    // must not shield, so they are skipped unless another profile shields them.
+    var shieldedApps = Set<ApplicationToken>()
+    var shieldedCategories = Set<ActivityCategoryToken>()
+    var grantExceptions = Set<ApplicationToken>()
+    var representative: SharedData.ProfileSnapshot?
+
+    for profile in limitProfiles {
+      AppLimitStore.resetDayIfNeeded(for: profile.id)
+      if AppLimitStore.isTimeExceeded(for: profile) {
+        shieldedApps.formUnion(profile.selectedActivity.applicationTokens)
+        shieldedCategories.formUnion(profile.selectedActivity.categoryTokens)
+        representative = representative ?? profile
+      } else if profile.hasAppOpenLimit {
+        shieldedApps.formUnion(profile.selectedActivity.applicationTokens)
+        shieldedCategories.formUnion(profile.selectedActivity.categoryTokens)
+        for grant in AppLimitStore.activeGrants(for: profile.id) {
+          if let app = grant.resource.applicationToken {
+            grantExceptions.insert(app)
+          }
+        }
+        representative = representative ?? profile
+      }
+    }
+
+    guard let base = representative else {
+      // No profile currently requires shielding (e.g. time-only limits with
+      // remaining budget). Do not clear: another feature may own the store.
+      return
+    }
+
+    shieldedApps.subtract(grantExceptions)
+    activateSoftUnblockRestrictions(
+      for: base,
+      unblockedApplicationTokens: grantExceptions,
+      unblockedCategoryTokens: []
+    )
+    // activateSoftUnblockRestrictions uses base's selection; when multiple
+    // limit profiles exist we union explicitly afterwards.
+    if !shieldedApps.isEmpty {
+      store.shield.applications = shieldedApps
+    }
+    if !shieldedCategories.isEmpty {
+      store.shield.applicationCategories = .specific(shieldedCategories, except: grantExceptions)
+    }
+  }
+
+  /// Clears limit shields only when no limit profile still needs them and no
+  /// focus session is active. Used at midnight reset.
+  func clearAppLimitRestrictionsIfIdle() {
+    if SharedData.getActiveSharedSession() != nil { return }
+    let needsShield = SharedData.profileSnapshots.values.contains { profile in
+      guard profile.hasAppLimitsEnabled, !profile.enableAllowMode else { return false }
+      if AppLimitStore.isTimeExceeded(for: profile) { return true }
+      return profile.hasAppOpenLimit
+    }
+    if !needsShield {
+      deactivateRestrictions()
+    } else {
+      refreshAllAppLimitRestrictions()
+    }
+  }
 }

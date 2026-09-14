@@ -4,6 +4,80 @@ import ManagedSettings
 import SwiftUI
 
 class DeviceActivityCenterUtil {
+  static let appLimitActivityId = "AppLimitTimerActivity"
+
+  static func appLimitActivityName(for profileId: UUID) -> DeviceActivityName {
+    DeviceActivityName(rawValue: "\(appLimitActivityId):\(profileId.uuidString)")
+  }
+
+  static func appLimitEventName(for profileId: UUID) -> DeviceActivityEvent.Name {
+    DeviceActivityEvent.Name("AppLimitUsageEvent.\(profileId.uuidString)")
+  }
+
+  /// Daily all-day monitoring for app limits. Time limits use threshold events;
+  /// open limits use the schedule itself (midnight reset) plus Shield grants.
+  /// Independent of focus sessions: runs even when no session is active.
+  static func scheduleAppLimitMonitoring(for profile: BlockedProfiles) {
+    let center = DeviceActivityCenter()
+    let activityName = appLimitActivityName(for: profile.id)
+
+    guard profile.hasAppLimitsEnabled else {
+      stopActivities(for: [activityName], with: center)
+      return
+    }
+
+    let schedule = DeviceActivitySchedule(
+      intervalStart: DateComponents(hour: 0, minute: 0, second: 0),
+      intervalEnd: DateComponents(hour: 23, minute: 59, second: 59),
+      repeats: true
+    )
+
+    var events: [DeviceActivityEvent.Name: DeviceActivityEvent] = [:]
+    if let minutes = profile.dailyTimeLimitInMinutes, minutes > 0 {
+      let threshold = DateComponents(
+        hour: minutes / 60, minute: minutes % 60)
+      let selection = profile.selectedActivity
+      events[appLimitEventName(for: profile.id)] = DeviceActivityEvent(
+        applications: selection.applicationTokens,
+        categories: selection.categoryTokens,
+        webDomains: selection.webDomainTokens,
+        threshold: threshold
+      )
+    }
+
+    do {
+      stopActivities(for: [activityName], with: center)
+      if events.isEmpty {
+        try center.startMonitoring(activityName, during: schedule)
+      } else {
+        try center.startMonitoring(activityName, during: schedule, events: events)
+      }
+      print("Scheduled app limit monitoring for profile \(profile.id.uuidString)")
+    } catch {
+      print("Failed to start app limit monitoring: \(error.localizedDescription)")
+    }
+
+    // Apply the correct shield state immediately (mid-day enable).
+    // Never override an active focus session.
+    if SharedData.getActiveSharedSession() == nil {
+      AppLimitStore.resetDayIfNeeded(for: profile.id)
+      AppBlockerUtil().activateRestrictionsForAppLimit(
+        for: BlockedProfiles.getSnapshot(for: profile))
+    }
+  }
+
+  static func removeAppLimitMonitoring(for profile: BlockedProfiles) {
+    stopActivities(for: [appLimitActivityName(for: profile.id)])
+  }
+
+  static func removeAllAppLimitMonitoring() {
+    let center = DeviceActivityCenter()
+    let activities = center.activities.filter {
+      $0.rawValue.hasPrefix(appLimitActivityId)
+    }
+    stopActivities(for: activities, with: center)
+  }
+
   static func scheduleTimerActivity(for profile: BlockedProfiles) {
     // Only schedule if the schedule is active
     guard let schedule = profile.schedule else { return }

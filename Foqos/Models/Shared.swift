@@ -14,6 +14,44 @@ enum SharedData {
   }
 
   // MARK: – Serializable snapshot of a profile (no sessions)
+  struct AppLimitConfiguration: Codable, Equatable {
+    static let dailyTimeRange = 1...1440
+    static let dailyOpenRange = 1...100
+    static let openDurationRange = 1...60
+    static let defaultOpenDurationInMinutes = 5
+
+    var dailyTimeLimitInMinutes: Int?
+    var dailyOpenLimit: Int?
+    var openDurationInMinutes: Int?
+
+    var isEnabled: Bool {
+      (dailyTimeLimitInMinutes ?? 0) > 0 || (dailyOpenLimit ?? 0) > 0
+    }
+
+    var hasTimeLimit: Bool {
+      (dailyTimeLimitInMinutes ?? 0) > 0
+    }
+
+    var hasOpenLimit: Bool {
+      (dailyOpenLimit ?? 0) > 0
+    }
+
+    var normalized: AppLimitConfiguration {
+      AppLimitConfiguration(
+        dailyTimeLimitInMinutes: dailyTimeLimitInMinutes.flatMap {
+          Self.dailyTimeRange.contains($0) ? $0 : nil
+        },
+        dailyOpenLimit: dailyOpenLimit.flatMap {
+          Self.dailyOpenRange.contains($0) ? $0 : nil
+        },
+        openDurationInMinutes: {
+          let raw = openDurationInMinutes ?? Self.defaultOpenDurationInMinutes
+          return min(max(raw, Self.openDurationRange.lowerBound), Self.openDurationRange.upperBound)
+        }()
+      )
+    }
+  }
+
   struct ProfileSnapshot: Codable, Equatable {
     var id: UUID
     var name: String
@@ -52,6 +90,38 @@ enum SharedData {
 
     var disableBackgroundStops: Bool?
     var enableEmergencyUnblock: Bool?
+
+    // MARK: - Daily app limits (alternative to focus sessions).
+    // All optional so snapshots written by older versions still decode.
+    var appLimitsEnabled: Bool? = nil
+    var dailyTimeLimitInMinutes: Int? = nil
+    var dailyOpenLimit: Int? = nil
+    var appLimitOpenDurationInMinutes: Int? = nil
+
+    var appLimitConfiguration: AppLimitConfiguration {
+      AppLimitConfiguration(
+        dailyTimeLimitInMinutes: dailyTimeLimitInMinutes,
+        dailyOpenLimit: dailyOpenLimit,
+        openDurationInMinutes: appLimitOpenDurationInMinutes
+      ).normalized
+    }
+
+    var hasAppLimitsEnabled: Bool {
+      (appLimitsEnabled ?? false) && appLimitConfiguration.isEnabled
+    }
+
+    var hasAppTimeLimit: Bool {
+      hasAppLimitsEnabled && appLimitConfiguration.hasTimeLimit
+    }
+
+    var hasAppOpenLimit: Bool {
+      hasAppLimitsEnabled && appLimitConfiguration.hasOpenLimit
+    }
+
+    var resolvedAppLimitOpenDurationInMinutes: Int {
+      appLimitConfiguration.openDurationInMinutes
+        ?? AppLimitConfiguration.defaultOpenDurationInMinutes
+    }
   }
 
   // MARK: – Serializable snapshot of a session (no profile object)

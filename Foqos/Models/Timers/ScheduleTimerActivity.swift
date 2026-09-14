@@ -114,3 +114,91 @@ class ScheduleTimerActivity: TimerActivity {
     return (intervalStart: intervalStart, intervalEnd: intervalEnd)
   }
 }
+
+// MARK: - Daily app limits (time + opens), independent of focus sessions.
+class AppLimitTimerActivity: TimerActivity {
+  static var id: String = "AppLimitTimerActivity"
+
+  private let appBlocker = AppBlockerUtil()
+
+  func getDeviceActivityName(from profileId: String) -> DeviceActivityName {
+    DeviceActivityName(rawValue: "\(AppLimitTimerActivity.id):\(profileId)")
+  }
+
+  func getAllAppLimitActivities(from activities: [DeviceActivityName]) -> [DeviceActivityName] {
+    activities.filter { $0.rawValue.hasPrefix(AppLimitTimerActivity.id) }
+  }
+
+  func profileId(from activityName: DeviceActivityName) -> String {
+    let components = activityName.rawValue.split(separator: ":", maxSplits: 1)
+    if components.count == 2 {
+      return String(components[1])
+    }
+    return activityName.rawValue
+  }
+
+  func start(for profile: SharedData.ProfileSnapshot) {
+    let profileId = profile.id.uuidString
+    log.info("Start app limit activity for \(profileId)")
+    AppLimitStore.resetDayIfNeeded(for: profile.id)
+    guard SharedData.getActiveSharedSession() == nil else {
+      log.info("Start app limit activity for \(profileId), session active, skipping")
+      return
+    }
+    appBlocker.activateRestrictionsForAppLimit(for: profile)
+  }
+
+  func stop(for profile: SharedData.ProfileSnapshot) {
+    let profileId = profile.id.uuidString
+    log.info("Stop app limit activity for \(profileId)")
+    AppLimitStore.removeExpiredGrants(for: profile.id)
+  }
+
+  func eventThresholdReached(for profile: SharedData.ProfileSnapshot) {
+    let profileId = profile.id.uuidString
+    log.info("App limit time threshold reached for \(profileId)")
+    AppLimitStore.setTimeExceeded(for: profile.id)
+    guard SharedData.getActiveSharedSession() == nil else {
+      log.info("App limit threshold for \(profileId), session active, skipping shields")
+      return
+    }
+    appBlocker.activateRestrictions(for: profile)
+  }
+}
+
+// MARK: - Temporary open grants for app limits.
+class AppLimitGrantTimerActivity: TimerActivity {
+  static var id: String = "AppLimitGrantTimerActivity"
+
+  private let appBlocker = AppBlockerUtil()
+
+  func profileId(from activityName: DeviceActivityName) -> String {
+    AppLimitGrantScheduler.identifiers(from: activityName)?.profileId.uuidString ?? ""
+  }
+
+  func start(for profile: SharedData.ProfileSnapshot) {
+    log.info("Start app limit grant without identifiers, ignoring")
+  }
+
+  func start(for profile: SharedData.ProfileSnapshot, activityName: DeviceActivityName) {
+    guard AppLimitGrantScheduler.identifiers(from: activityName) != nil else { return }
+    guard SharedData.getActiveSharedSession() == nil else { return }
+    appBlocker.activateRestrictionsForAppLimit(for: profile)
+  }
+
+  func stop(for profile: SharedData.ProfileSnapshot) {
+    log.info("Stop app limit grant without identifiers, ignoring")
+  }
+
+  func stop(for profile: SharedData.ProfileSnapshot, activityName: DeviceActivityName) {
+    guard let identifiers = AppLimitGrantScheduler.identifiers(from: activityName) else { return }
+    // Grant expired: drop it and re-shield the profile.
+    AppLimitStore.removeGrant(id: identifiers.grantId, profileId: identifiers.profileId)
+    guard SharedData.getActiveSharedSession() == nil else { return }
+    if let current = SharedData.snapshot(for: identifiers.profileId.uuidString) {
+      appBlocker.activateRestrictionsForAppLimit(for: current)
+    } else {
+      appBlocker.activateRestrictionsForAppLimit(for: profile)
+    }
+  }
+}

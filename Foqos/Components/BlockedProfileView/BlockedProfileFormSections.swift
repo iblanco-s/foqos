@@ -650,3 +650,187 @@ struct BlockedProfileNotificationsSection: View {
     }
   }
 }
+
+struct BlockedProfileAppLimitsFields: View {
+  @EnvironmentObject private var themeManager: ThemeManager
+
+  @ObservedObject var draft: BlockedProfileDraft
+  var disabled: Bool
+
+  var body: some View {
+    CustomToggle(
+      title: "Daily App Limits",
+      description:
+        "Limit total time and/or opens per day for the apps above. Works without starting a focus session. Resets at midnight.",
+      isOn: $draft.appLimitsEnabled,
+      isDisabled: disabled
+    )
+
+    if draft.enableAllowMode {
+      Text("Daily Limits need blocklist mode. Turn off “Allow Only Selected Apps” to use them.")
+        .font(.caption)
+        .foregroundStyle(.orange)
+    }
+
+    if draft.appLimitsEnabled {
+      CustomToggle(
+        title: "Limit Daily Usage Time",
+        description: "Block the selected apps for the rest of the day after this much use.",
+        isOn: $draft.enableDailyTimeLimit,
+        isDisabled: disabled
+      )
+
+      if draft.enableDailyTimeLimit {
+        timeLimitPicker
+      }
+
+      CustomToggle(
+        title: "Limit Daily Opens",
+        description:
+          "Keep the selected apps blocked. Each tap on Open uses one open and grants short access.",
+        isOn: $draft.enableDailyOpenLimit,
+        isDisabled: disabled
+      )
+
+      if draft.enableDailyOpenLimit {
+        opensPicker
+        openDurationPicker
+      }
+
+      if !draft.enableDailyTimeLimit && !draft.enableDailyOpenLimit {
+        Text("Turn on at least one limit below.")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
+    }
+  }
+
+  private var timeLimitPicker: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      HStack {
+        Text("Daily time limit")
+        Spacer()
+        Text(formatMinutes(draft.dailyTimeLimitInMinutes))
+          .fontWeight(.semibold)
+          .foregroundStyle(.secondary)
+          .contentTransition(.numericText())
+      }
+
+      Slider(
+        value: timeBinding,
+        in: 5...480,
+        step: 5
+      )
+      .tint(themeManager.themeColor)
+
+      HStack {
+        Text("5m")
+        Spacer()
+        Text("8h")
+      }
+      .font(.caption2)
+      .foregroundStyle(.secondary)
+    }
+    .disabled(disabled)
+  }
+
+  private var opensPicker: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      HStack {
+        Text("Opens per day")
+        Spacer()
+        Text("\(draft.dailyOpenLimit)")
+          .fontWeight(.semibold)
+          .foregroundStyle(.secondary)
+          .contentTransition(.numericText())
+      }
+
+      Slider(
+        value: opensBinding,
+        in: 1...50,
+        step: 1
+      )
+      .tint(themeManager.themeColor)
+
+      HStack {
+        Text("1")
+        Spacer()
+        Text("50")
+      }
+      .font(.caption2)
+      .foregroundStyle(.secondary)
+    }
+    .disabled(disabled)
+  }
+
+  private var openDurationPicker: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      HStack {
+        Text("Each open lasts")
+        Spacer()
+        Text(formatMinutes(draft.appLimitOpenDurationInMinutes))
+          .fontWeight(.semibold)
+          .foregroundStyle(.secondary)
+          .contentTransition(.numericText())
+      }
+
+      Slider(
+        value: openDurationBinding,
+        in: 1...30,
+        step: 1
+      )
+      .tint(themeManager.themeColor)
+
+      HStack {
+        Text("1m")
+        Spacer()
+        Text("30m")
+      }
+      .font(.caption2)
+      .foregroundStyle(.secondary)
+    }
+    .disabled(disabled)
+  }
+
+  private var timeBinding: Binding<Double> {
+    Binding(
+      get: { Double(draft.dailyTimeLimitInMinutes) },
+      set: { draft.dailyTimeLimitInMinutes = Int($0) }
+    )
+  }
+
+  private var opensBinding: Binding<Double> {
+    Binding(
+      get: { Double(draft.dailyOpenLimit) },
+      set: { draft.dailyOpenLimit = Int($0) }
+    )
+  }
+
+  private var openDurationBinding: Binding<Double> {
+    Binding(
+      get: { Double(draft.appLimitOpenDurationInMinutes) },
+      set: { draft.appLimitOpenDurationInMinutes = Int($0) }
+    )
+  }
+
+  private func formatMinutes(_ minutes: Int) -> String {
+    if minutes < 60 { return "\(minutes)m" }
+    let h = minutes / 60
+    let m = minutes % 60
+    if m == 0 { return "\(h)h" }
+    return "\(h)h \(m)m"
+  }
+}
+
+struct BlockedProfileAppLimitsSection: View {
+  @ObservedObject var draft: BlockedProfileDraft
+  var disabled: Bool
+
+  var body: some View {
+    Section("Daily Limits") {
+      BlockedProfileAppLimitsFields(draft: draft, disabled: disabled)
+    } footer: {
+      Text("Alternative to sessions: enforced every day via Screen Time, even with the app closed.")
+    }
+  }
+}

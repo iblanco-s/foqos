@@ -74,3 +74,72 @@ enum SoftUnblockGrantScheduler {
     )
   }
 }
+
+// MARK: - Temporary open grants for daily app limits (no session required).
+enum AppLimitGrantScheduler {
+  static let activityId = "AppLimitGrantTimerActivity"
+
+  struct ActivityIdentifiers: Equatable {
+    let profileId: UUID
+    let grantId: UUID
+  }
+
+  static func scheduleGrant(_ grant: AppLimitOpenGrant) throws {
+    let center = DeviceActivityCenter()
+    let activityName = activityName(for: grant)
+    let calendar = Calendar.current
+    let now = Date()
+    let dateComponents: Set<Calendar.Component> = [
+      .year, .month, .day, .hour, .minute, .second,
+    ]
+    let intervalStart = calendar.dateComponents(
+      dateComponents,
+      from: calendar.startOfDay(for: now)
+    )
+    let intervalEnd = calendar.dateComponents(
+      dateComponents,
+      from: max(grant.expiresAt, now.addingTimeInterval(60))
+    )
+    let schedule = DeviceActivitySchedule(
+      intervalStart: intervalStart,
+      intervalEnd: intervalEnd,
+      repeats: false
+    )
+
+    try center.startMonitoring(activityName, during: schedule)
+  }
+
+  static func stopAll(profileId: UUID? = nil) {
+    let center = DeviceActivityCenter()
+    let prefix = "\(activityId):"
+    let activities = center.activities.filter { activity in
+      guard activity.rawValue.hasPrefix(prefix) else { return false }
+      guard let profileId else { return true }
+      return identifiers(from: activity)?.profileId == profileId
+    }
+
+    guard !activities.isEmpty else { return }
+    center.stopMonitoring(activities)
+  }
+
+  static func identifiers(from activityName: DeviceActivityName) -> ActivityIdentifiers? {
+    let components = activityName.rawValue.split(separator: ":", maxSplits: 1)
+    guard components.count == 2, components[0] == Substring(activityId) else { return nil }
+
+    let payload = components[1].split(separator: "|", maxSplits: 1)
+    guard payload.count == 2,
+      let profileId = UUID(uuidString: String(payload[0])),
+      let grantId = UUID(uuidString: String(payload[1]))
+    else {
+      return nil
+    }
+
+    return ActivityIdentifiers(profileId: profileId, grantId: grantId)
+  }
+
+  private static func activityName(for grant: AppLimitOpenGrant) -> DeviceActivityName {
+    DeviceActivityName(
+      rawValue: "\(activityId):\(grant.profileId.uuidString)|\(grant.id.uuidString)"
+    )
+  }
+}

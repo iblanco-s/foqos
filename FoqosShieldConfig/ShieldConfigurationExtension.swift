@@ -5,6 +5,7 @@
 //  Created by Ali Waseem on 2025-08-11.
 //
 
+import FamilyControls
 import ManagedSettings
 import ManagedSettingsUI
 import SwiftUI
@@ -19,6 +20,10 @@ class ShieldConfigurationExtension: ShieldConfigurationDataSource {
       return softUnblockConfiguration
     }
 
+    if let limitConfiguration = appLimitConfiguration(for: application, in: nil) {
+      return limitConfiguration
+    }
+
     return createCustomShieldConfiguration(
       for: .app, title: application.localizedDisplayName ?? "App")
   }
@@ -28,6 +33,10 @@ class ShieldConfigurationExtension: ShieldConfigurationDataSource {
   {
     if let softUnblockConfiguration = softUnblockConfiguration(for: application, in: category) {
       return softUnblockConfiguration
+    }
+
+    if let limitConfiguration = appLimitConfiguration(for: application, in: category) {
+      return limitConfiguration
     }
 
     return createCustomShieldConfiguration(
@@ -200,6 +209,122 @@ class ShieldConfigurationExtension: ShieldConfigurationDataSource {
       count: session.maximumUnblockCount - session.remainingUnblockCount
     )
     return (availableBreaks + usedBreaks).joined(separator: "  ")
+  }
+
+  // MARK: - Daily app limits
+
+  private func appLimitConfiguration(
+    for application: Application,
+    in category: ActivityCategory?
+  ) -> ShieldConfiguration? {
+    guard let match = matchingLimitProfile(for: application, in: category) else {
+      return nil
+    }
+    let profile = match.profile
+    let resource = match.resource
+    let appName = application.localizedDisplayName ?? "This app"
+
+    // Skip when a grant already covers this resource; the shield should lift.
+    if AppLimitStore.hasActiveGrant(for: resource, profileId: profile.id) {
+      return nil
+    }
+
+    if AppLimitStore.isTimeExceeded(for: profile) {
+      return ShieldConfiguration(
+        backgroundBlurStyle: .dark,
+        backgroundColor: UIColor(ThemeManager.shared.themeColor),
+        icon: makeEmojiIcon("⏳", size: 96),
+        title: ShieldConfiguration.Label(text: "Time's up for today", color: .white),
+        subtitle: ShieldConfiguration.Label(
+          text:
+            "\(appName) hit its daily limit in \(profile.name). Fresh budget at midnight.",
+          color: UIColor.white.withAlphaComponent(0.88)
+        ),
+        primaryButtonLabel: ShieldConfiguration.Label(text: "Back", color: .black),
+        primaryButtonBackgroundColor: .white,
+        secondaryButtonLabel: nil
+      )
+    }
+
+    guard profile.hasAppOpenLimit else { return nil }
+    let remaining = AppLimitStore.remainingOpens(for: profile)
+    let minutes = profile.resolvedAppLimitOpenDurationInMinutes
+
+    if remaining <= 0 {
+      return ShieldConfiguration(
+        backgroundBlurStyle: .dark,
+        backgroundColor: UIColor(ThemeManager.shared.themeColor),
+        icon: makeEmojiIcon("🔒", size: 96),
+        title: ShieldConfiguration.Label(text: "No opens left", color: .white),
+        subtitle: ShieldConfiguration.Label(
+          text:
+            "You used all opens for \(appName) in \(profile.name) today. Resets at midnight.",
+          color: UIColor.white.withAlphaComponent(0.88)
+        ),
+        primaryButtonLabel: ShieldConfiguration.Label(text: "Back", color: .black),
+        primaryButtonBackgroundColor: .white,
+        secondaryButtonLabel: nil
+      )
+    }
+
+    let dots = limitDots(remaining: remaining, total: profile.dailyOpenLimit ?? remaining)
+    return ShieldConfiguration(
+      backgroundBlurStyle: .dark,
+      backgroundColor: UIColor(ThemeManager.shared.themeColor),
+      icon: makeEmojiIcon("🎯", size: 96),
+      title: ShieldConfiguration.Label(text: "Daily limit", color: .white),
+      subtitle: ShieldConfiguration.Label(
+        text:
+          "\(appName) · \(remaining) open\(remaining == 1 ? "" : "s") left in \(profile.name)\n\(dots)\nResets at midnight.",
+        color: UIColor.white.withAlphaComponent(0.88)
+      ),
+      primaryButtonLabel: ShieldConfiguration.Label(
+        text: "Open for \(minutes)m", color: .black),
+      primaryButtonBackgroundColor: .white,
+      secondaryButtonLabel: ShieldConfiguration.Label(text: "Back", color: .white)
+    )
+  }
+
+  private func matchingLimitProfile(
+    for application: Application,
+    in category: ActivityCategory?
+  ) -> (profile: SharedData.ProfileSnapshot, resource: SoftUnblockResource)? {
+    let snapshots = SharedData.profileSnapshots.values.filter { $0.hasAppLimitsEnabled }
+    guard !snapshots.isEmpty else { return nil }
+
+    if let categoryToken = category?.token {
+      for profile in snapshots {
+        if !profile.enableAllowMode
+          && profile.selectedActivity.categoryTokens.contains(categoryToken)
+        {
+          return (profile, .category(categoryToken))
+        }
+      }
+    }
+    if let appToken = application.token {
+      for profile in snapshots {
+        if !profile.enableAllowMode
+          && profile.selectedActivity.applicationTokens.contains(appToken)
+        {
+          return (profile, .application(appToken))
+        }
+      }
+    }
+    // Time-only profiles still show "time's up" even for web/category shields
+    // matched by app when tokens are unavailable.
+    if let timedOut = snapshots.first(where: { AppLimitStore.isTimeExceeded(for: $0) }),
+      let appToken = application.token
+    {
+      return (timedOut, .application(appToken))
+    }
+    return nil
+  }
+
+  private func limitDots(remaining: Int, total: Int) -> String {
+    let total = max(total, remaining)
+    let available = Array(repeating: "●", count: remaining)
+    let used = Array(repeating: "○", count: max(total - remaining, 0))
+    return (available + used).joined(separator: "  ")
   }
 
   private func softUnblockPresentation(
